@@ -63,6 +63,29 @@ export const url = z.preprocess(
 const strictMessage =
   "Unrecognized key in body -- please review the v2 API documentation for request body changes";
 
+function validateSchemaForOpenAI(schema: any): boolean {
+  if (!schema || typeof schema !== 'object') return true;
+  
+  function hasAdditionalProperties(obj: any): boolean {
+    if (typeof obj !== 'object' || obj === null) return false;
+    
+    if (obj.hasOwnProperty('additionalProperties')) return true;
+    
+    for (const value of Object.values(obj)) {
+      if (typeof value === 'object' && value !== null) {
+        if (hasAdditionalProperties(value)) return true;
+      }
+    }
+    return false;
+  }
+  
+  return !hasAdditionalProperties(schema);
+}
+
+const OPENAI_SCHEMA_ERROR_MESSAGE = "Schema contains 'additionalProperties' which is not supported by OpenAI. Please remove this property from your schema.";
+
+const OPENAI_SCHEMA_ERROR_MESSAGE = "Schema contains 'additionalProperties' which is not supported by OpenAI. Please remove this property from your schema.";
+
 const ACTIONS_MAX_WAIT_TIME = 60;
 const MAX_ACTIONS = 50;
 function calculateTotalWaitTime(
@@ -174,7 +197,12 @@ const actionsSchema = z
 const jsonFormatWithOptions = z
   .object({
     type: z.literal("json"),
-    schema: z.any().optional(),
+    schema: z.any().optional().refine(
+      (val) => validateSchemaForOpenAI(val),
+      {
+        message: OPENAI_SCHEMA_ERROR_MESSAGE,
+      },
+    ),
     prompt: z.string().max(10000).optional(),
   })
   .strict();
@@ -185,7 +213,12 @@ const changeTrackingFormatWithOptions = z
   .object({
     type: z.literal("changeTracking"),
     prompt: z.string().optional(),
-    schema: z.any().optional(),
+    schema: z.any().optional().refine(
+      (val) => validateSchemaForOpenAI(val),
+      {
+        message: OPENAI_SCHEMA_ERROR_MESSAGE,
+      },
+    ),
     modes: z.enum(["json", "git-diff"]).array().optional().default([]),
     tag: z.string().or(z.null()).default(null),
   })
@@ -477,6 +510,12 @@ const extractOptions = z
         },
         {
           message: "Invalid JSON schema.",
+        },
+      )
+      .refine(
+        (val) => validateSchemaForOpenAI(val),
+        {
+          message: OPENAI_SCHEMA_ERROR_MESSAGE,
         },
       ),
     limit: z.number().int().positive().finite().safe().optional(),
