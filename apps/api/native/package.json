@@ -66,11 +66,5 @@
     "trailingComma": "all",
     "singleQuote": true,
     "arrowParens": "always"
-  },
-  "optionalDependencies": {
-    "@mendable/firecrawl-rs-win32-x64-msvc": "1.0.0",
-    "@mendable/firecrawl-rs-darwin-x64": "1.0.0",
-    "@mendable/firecrawl-rs-linux-x64-gnu": "1.0.0",
-    "@mendable/firecrawl-rs-darwin-arm64": "1.0.0"
   }
 }

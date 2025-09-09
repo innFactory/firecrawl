@@ -150,12 +150,18 @@
     "onlyBuiltDependencies": [
       "@mendable/firecrawl-rs",
       "@sentry-internal/node-cpu-profiler",
+      "@sentry/cli",
       "bigint-buffer",
       "bufferutil",
+      "esbuild",
       "keccak",
+      "koffi",
       "libpq",
+      "msgpackr-extract",
+      "protobufjs",
       "supabase",
-      "utf-8-validate"
+      "utf-8-validate",
+      "wordpos"
     ],
     "overrides": {
       "brace-expansion@>=2.0.0 <=2.0.1": "2.0.2"
