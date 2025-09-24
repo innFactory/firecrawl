@@ -957,18 +957,18 @@ describe("Scrape tests", () => {
             expect(response.changeTracking?.json).toBeDefined();
             if (response.changeTracking?.json.pricing) {
               expect(response.changeTracking?.json.pricing).toHaveProperty(
-                "old",
+                "previous",
               );
               expect(response.changeTracking?.json.pricing).toHaveProperty(
-                "new",
+                "current",
               );
             }
             if (response.changeTracking?.json.features) {
               expect(response.changeTracking?.json.features).toHaveProperty(
-                "old",
+                "previous",
               );
               expect(response.changeTracking?.json.features).toHaveProperty(
-                "new",
+                "current",
               );
             }
           }
