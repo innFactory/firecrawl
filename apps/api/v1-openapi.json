@@ -387,7 +387,7 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "example": "Cannot cancel job that has already completed"
+                      "example": "Crawl job already completed"
                     }
                   }
                 }
@@ -632,7 +632,7 @@
                   "properties": {
                     "error": {
                       "type": "string",
-                      "example": "Cannot cancel job that has already completed"
+                      "example": "Crawl job already completed"
                     }
                   }
                 }
