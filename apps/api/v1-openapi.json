@@ -379,7 +379,7 @@
             }
           },
           "409": {
-            "description": "Job already completed",
+            "description": "Crawl job already completed",
             "content": {
               "application/json": {
                 "schema": {
@@ -624,7 +624,7 @@
             }
           },
           "409": {
-            "description": "Job already completed",
+            "description": "Crawl job already completed",
             "content": {
               "application/json": {
                 "schema": {
