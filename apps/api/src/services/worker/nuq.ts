@@ -95,10 +95,12 @@ class NuQ<JobData = any, JobReturnValue = any> {
       let reconnectTimeout: NodeJS.Timeout | null = null;
 
       const onClose = function onClose() {
+        this.startedListener = false;
+        this.listener = null;
+
         logger.info("NuQ listener channel closed", {
           module: "nuq/rabbitmq",
         });
-        this.listener = null;
 
         if (reconnectTimeout) clearTimeout(reconnectTimeout);
         reconnectTimeout = setTimeout(

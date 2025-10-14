@@ -545,7 +545,9 @@ async function processJob(job: NuQJob<ScrapeJobSingleUrls>) {
         },
         false,
         job.data.internalOptions?.bypassBilling ?? false,
-      );
+      ).catch(error => {
+        logger.error("Error logging job to GCS", { error });
+      });
 
       // only 'await' the GCS upload if it's a large document (not forwarded to API via Rabbit / Redis)
       if (blobSize > NUQ_GCS_WAIT_SIZE) {

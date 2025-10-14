@@ -97,6 +97,7 @@ export class NuQRabbit {
     this.publisher = undefined as any;
     this.consumer = undefined as any;
     this.statusConsumer = undefined as any;
+    this.statusConsumerPromise = undefined as any;
     this.reconnectTimer = setTimeout(() => this.start(), 500);
   }
 
@@ -229,13 +230,13 @@ export class NuQRabbit {
               if (listeners) listeners.forEach(listener => listener(result));
               this.listeners.delete(id);
             } catch (error) {
-              logger.error("Error in rabbit queue generator", error);
+              logger.error("Error in NuQ RabbitMQ reply consumer", { error });
             }
           } catch (error) {
-            logger.error("Error in rabbit queue generator", error);
+            logger.error("Error in NuQ RabbitMQ reply consumer", { error });
+          } finally {
+            this.statusConsumer.ack(msg);
           }
-
-          this.statusConsumer.ack(msg);
         },
         { noAck: false, consumerTag: `${this.replyQueue}.client` },
       );
