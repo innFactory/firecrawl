@@ -5,6 +5,8 @@ use std::error::Error;
 use std::io::Cursor;
 use std::num::NonZeroU32;
 
+const ONE: NonZeroU32 = unsafe { NonZeroU32::new_unchecked(1) };
+
 pub struct XlsxProvider;
 
 impl XlsxProvider {
@@ -20,7 +22,7 @@ impl DocumentProvider for XlsxProvider {
 
     let mut blocks: Vec<Block> = Vec::new();
 
-    for sheet_name in workbook.sheet_names().to_owned() {
+    for sheet_name in workbook.sheet_names() {
       // Add sheet heading
       blocks.push(Block::Paragraph(Paragraph {
         kind: ParagraphKind::Heading(2),
@@ -43,8 +45,8 @@ impl DocumentProvider for XlsxProvider {
             };
             cells.push(TableCell {
               blocks: blocks_in_cell,
-              colspan: NonZeroU32::new(1).unwrap(),
-              rowspan: NonZeroU32::new(1).unwrap(),
+              colspan: ONE,
+              rowspan: ONE,
             });
           }
           rows.push(TableRow {
