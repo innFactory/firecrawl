@@ -1,0 +1,16 @@
+# Pick your baseUrl here:
+@baseUrl = http://localhost:3002
+# @baseUrl = https://api.firecrawl.dev
+
+
+### Scrape Website
+POST {{baseUrl}}/v2/scrape HTTP/1.1
+Authorization: Bearer {{TEST_API_KEY}}
+content-type: application/json
+
+{
+    "url": "https://www.firecrawl.dev",
+    "formats": ["markdown", "html"],
+}
+
+>>! kulala_output.json
