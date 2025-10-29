@@ -59,11 +59,12 @@ function normalizeOwnerId(ownerId: string | undefined | null): string | null {
   return uuidv5(ownerId, normalizedUUIDNamespace);
 }
 
-const listenChannelId = process.env.NUQ_POD_NAME ?? "main";
-
 // === Queue
 
 class NuQ<JobData = any, JobReturnValue = any> {
+  private listenChannelId: string =
+    (process.env.NUQ_POD_NAME ?? "main") + "-" + crypto.randomUUID();
+
   constructor(
     public readonly queueName: string,
     public readonly options: NuQOptions,
@@ -86,34 +87,41 @@ class NuQ<JobData = any, JobReturnValue = any> {
   private listens: {
     [key: string]: ((status: "completed" | "failed") => void)[];
   } = {};
+  private listenerStarting = false;
   private shuttingDown = false;
 
   private async startListener() {
-    if (this.listener || this.shuttingDown) return;
+    if (this.listener || this.shuttingDown || this.listenerStarting) return;
 
     if (process.env.NUQ_RABBITMQ_URL) {
-      const connection = await amqp.connect(process.env.NUQ_RABBITMQ_URL);
-      const channel = await connection.createChannel();
-      await channel.prefetch(1);
-      const queue = await channel.assertQueue(
-        this.queueName + ".listen." + listenChannelId,
-        {
-          exclusive: true,
-          autoDelete: true,
-          durable: false,
-          arguments: {
-            "x-queue-type": "classic",
-            "x-message-ttl": 60000,
-          },
-        },
-      );
+      this.listenerStarting = true;
 
-      this.listener = {
-        type: "rabbitmq",
-        connection,
-        channel,
-        queue: queue.queue,
-      };
+      try {
+        const connection = await amqp.connect(process.env.NUQ_RABBITMQ_URL);
+        const channel = await connection.createChannel();
+        await channel.prefetch(1);
+        const queue = await channel.assertQueue(
+          this.queueName + ".listen." + this.listenChannelId,
+          {
+            exclusive: true,
+            autoDelete: true,
+            durable: false,
+            arguments: {
+              "x-queue-type": "classic",
+              "x-message-ttl": 60000,
+            },
+          },
+        );
+
+        this.listener = {
+          type: "rabbitmq",
+          connection,
+          channel,
+          queue: queue.queue,
+        };
+      } finally {
+        this.listenerStarting = false;
+      }
 
       let reconnectTimeout: NodeJS.Timeout | null = null;
 
@@ -138,8 +146,8 @@ class NuQ<JobData = any, JobReturnValue = any> {
         return;
       }.bind(this);
 
-      connection.on("close", onClose);
-      channel.on("close", onClose);
+      this.listener.connection.on("close", onClose);
+      this.listener.channel.on("close", onClose);
 
       await this.listener.channel.consume(
         this.listener.queue,
@@ -662,7 +670,7 @@ class NuQ<JobData = any, JobReturnValue = any> {
                 id,
                 data,
                 options.priority ?? 0,
-                options.listenable ? listenChannelId : null,
+                options.listenable ? this.listenChannelId : null,
                 normalizeOwnerId(options.ownerId),
                 options.groupId ?? null,
                 ...(options.backlogged
@@ -780,7 +788,7 @@ class NuQ<JobData = any, JobReturnValue = any> {
                   job.id,
                   job.data,
                   job.options.priority ?? 0,
-                  job.options.listenable ? listenChannelId : null,
+                  job.options.listenable ? this.listenChannelId : null,
                   normalizeOwnerId(job.options.ownerId),
                   job.options.groupId ?? null,
                   ...(tableSuffix === "_backlog"
@@ -1242,16 +1250,39 @@ class NuQ<JobData = any, JobReturnValue = any> {
   // === Metrics
   public async getMetrics(): Promise<string> {
     const start = Date.now();
-    const result = await nuqPool.query(
-      `SELECT status, COUNT(id) as count FROM ${this.queueName} GROUP BY status ORDER BY count DESC;`,
-    );
+    // swapped to slim version for performance reasons - mogery
+    // const result = await nuqPool.query(`
+    //   SELECT status::text, COUNT(id) as count FROM ${this.queueName} GROUP BY status
+    //   ${this.options.backlog ? `UNION ALL SELECT 'backlog'::text as status, COUNT(id) as count FROM ${this.queueName}_backlog` : ""}
+    // `);
+    const result = await nuqPool.query(`
+      SELECT status::text, COUNT(id) as count FROM ${this.queueName} WHERE status IN ('queued', 'active') GROUP BY status
+    `);
     logger.info("nuqGetMetrics metrics", {
       module: "nuq/metrics",
       method: "nuqGetMetrics",
       duration: Date.now() - start,
     });
     const prometheusQueueName = this.queueName.replace(".", "_");
-    return `# HELP ${prometheusQueueName}_job_count Number of jobs in each status\n# TYPE ${prometheusQueueName}_job_count gauge\n${result.rows.map(x => `${prometheusQueueName}_job_count{status="${x.status}"} ${x.count}`).join("\n")}\n`;
+
+    const statusCounts = new Map<NuQJobStatus, number>([
+      ["queued", 0],
+      ["active", 0],
+      ["completed", 0],
+      ["failed", 0],
+      ["backlog", 0],
+    ]);
+
+    result.rows.forEach(x => statusCounts.set(x.status, parseInt(x.count, 10)));
+
+    return `# HELP ${prometheusQueueName}_job_count Number of jobs in each status\n# TYPE ${prometheusQueueName}_job_count gauge\n${Array.from(
+      statusCounts.entries(),
+    )
+      .map(
+        ([status, count]) =>
+          `${prometheusQueueName}_job_count{status="${status}"} ${count}`,
+      )
+      .join("\n")}\n`;
   }
 
   // === Cleanup
