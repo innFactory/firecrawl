@@ -17,7 +17,6 @@
     return Number.isFinite(num) ? num : null;
   };
 
-  // Resolve SVG CSS variables (must happen in browser)
   const resolveSvgStyles = svg => {
     const originalElements = [svg, ...svg.querySelectorAll("*")];
     const computedStyles = originalElements.map(el => ({
@@ -88,7 +87,6 @@
     return clone;
   };
 
-  // Collect raw CSS data
   const collectCSSData = () => {
     const data = {
       colors: [],
@@ -110,7 +108,6 @@
           if (rule.type === CSSRule.STYLE_RULE) {
             const s = rule.style;
 
-            // Collect colors
             [
               "color",
               "background-color",
@@ -122,7 +119,6 @@
               if (val) data.colors.push(val);
             });
 
-            // Collect radii
             [
               "border-radius",
               "border-top-left-radius",
@@ -134,7 +130,6 @@
               if (v) data.radii.push(v);
             });
 
-            // Collect spacings
             [
               "margin",
               "margin-top",
@@ -161,7 +156,6 @@
     return data;
   };
 
-  // Sample elements and get raw styles
   const sampleElements = () => {
     const picks = [];
     const pushQ = (q, limit = 10) => {
@@ -180,7 +174,6 @@
     return Array.from(new Set(picks.filter(Boolean)));
   };
 
-  // Get raw style data from element
   const getStyleSnapshot = el => {
     const cs = getComputedStyle(el);
     const rect = el.getBoundingClientRect();
@@ -226,7 +219,6 @@
     let hasCTAIndicator = false;
 
     try {
-      // Check for explicit CTA indicators first
       hasCTAIndicator =
         el.matches(
           '[data-primary-button],[data-secondary-button],[data-cta],[class*="cta"],[class*="hero"]',
@@ -234,7 +226,6 @@
         el.getAttribute("data-primary-button") === "true" ||
         el.getAttribute("data-secondary-button") === "true";
 
-      // Only mark as navigation if NOT a CTA and matches navigation patterns
       if (!hasCTAIndicator) {
         isNavigation =
           el.matches(
@@ -244,17 +235,13 @@
             'nav, [role="navigation"], [class*="navigation"], [class*="dropdown"], [role="menu"]',
           );
       }
-    } catch (e) {
-      // Ignore selector errors
-    }
+    } catch (e) {}
 
-    // For buttons, if background is transparent/very transparent, check parent backgrounds
     if (isButton && bgColor) {
       let isTransparent =
         bgColor === "transparent" || bgColor === "rgba(0, 0, 0, 0)";
       let hasLowAlpha = false;
 
-      // Check if alpha is very low (< 0.1)
       const alphaMatch = bgColor.match(
         /(?:rgba?\([^,]*,[^,]*,[^,]*,\s*|color\([^/]*\/\s*)([\d.]+)\)?$/,
       );
@@ -264,7 +251,6 @@
       }
 
       if (isTransparent || hasLowAlpha) {
-        // Walk up parent chain to find a non-transparent background
         let parent = el.parentElement;
         let depth = 0;
         while (parent && depth < 5) {
@@ -318,7 +304,6 @@
     };
   };
 
-  // Find images (logo, favicon, og)
   const findImages = () => {
     const imgs = [];
     const push = (src, type) => {
@@ -332,7 +317,6 @@
       "twitter",
     );
 
-    // Priority: img/svg inside link inside header
     const headerLinkImg = document.querySelector(
       'header a img, header a svg, nav a img, nav a svg, [role="banner"] a img, [role="banner"] a svg, .header a img, .header a svg',
     );
@@ -349,7 +333,6 @@
         push(headerLinkImg.src, "logo");
       }
     } else {
-      // Fallback: find logo images
       const logoImgCandidates = Array.from(document.images)
         .filter(
           img =>
@@ -377,7 +360,6 @@
 
       if (logoImg) push(logoImg.src, "logo");
 
-      // Find SVG logo
       const svgLogoCandidates = Array.from(document.querySelectorAll("svg"))
         .filter(
           s => /logo/i.test(s.id) || /logo/i.test(s.className?.baseVal || ""),
@@ -413,7 +395,6 @@
     return imgs;
   };
 
-  // Get typography from key elements
   const getTypography = () => {
     const pickFontStack = el => {
       return (
@@ -443,7 +424,6 @@
     };
   };
 
-  // Detect framework hints
   const detectFrameworkHints = () => {
     const hints = [];
 
@@ -469,12 +449,10 @@
     return hints.filter(Boolean);
   };
 
-  // Simple color scheme detection
   const detectColorScheme = () => {
     const body = document.body;
     const html = document.documentElement;
 
-    // Check explicit dark mode classes/attributes
     if (
       html.classList.contains("dark") ||
       body.classList.contains("dark") ||
@@ -487,7 +465,6 @@
       return "dark";
     }
 
-    // Check background color luminance
     const bg =
       getComputedStyle(body).backgroundColor ||
       getComputedStyle(html).backgroundColor;
@@ -501,7 +478,6 @@
     return "light";
   };
 
-  // Collect all data
   const cssData = collectCSSData();
   const elements = sampleElements();
   const snapshots = elements.map(getStyleSnapshot);
@@ -510,7 +486,6 @@
   const frameworkHints = detectFrameworkHints();
   const colorScheme = detectColorScheme();
 
-  // Debug info for button colors
   const buttonDebug = snapshots
     .filter(s => s.isButton)
     .slice(0, 10)
@@ -523,9 +498,8 @@
       rect: s.rect,
     }));
 
-  // Return raw data - Node.js will process it
   return {
-    raw: {
+    branding: {
       cssData,
       snapshots,
       images,

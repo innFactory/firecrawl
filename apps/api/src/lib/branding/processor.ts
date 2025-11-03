@@ -1,9 +1,4 @@
-/**
- * Node.js branding processor
- * Takes raw data from browser and processes it here for better performance
- */
-
-import { BrandingProfile } from "../../../types/branding";
+import { BrandingProfile } from "../../types/branding";
 
 interface RawBrandingData {
   cssData: {

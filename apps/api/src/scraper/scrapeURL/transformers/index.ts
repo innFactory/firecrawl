@@ -15,17 +15,8 @@ import { deriveDiff } from "./diff";
 import { useIndex, useSearchIndex } from "../../../services/index";
 import { sendDocumentToIndex } from "../engines/index/index";
 import { sendDocumentToSearchIndex } from "./sendToSearchIndex";
-import {
-  hasFormatOfType,
-  hasAnyFormatOfTypes,
-} from "../../../lib/format-utils";
-import { BrandingProfile } from "../../../types/branding";
-import {
-  enhanceBrandingWithLLM,
-  mergeBrandingResults,
-  ButtonSnapshot,
-} from "../../../lib/branding-llm";
-import { processRawBranding } from "./branding-processor";
+import { hasFormatOfType } from "../../../lib/format-utils";
+import { brandingTransformer } from "../../../lib/branding/transformer";
 
 type Transformer = (
   meta: Meta,
@@ -182,123 +173,29 @@ async function deriveBrandingFromActions(
     return document;
   }
 
+  /**
+   * Find the branding return in the actions javascript returns
+   * @see src/scraper/scrapeURL/engines/fire-engine/scripts/branding.js
+   */
   const brandingReturnIndex = document.actions?.javascriptReturns?.findIndex(
-    x =>
-      x.type === "object" &&
-      ("fonts" in (x.value as any) || // Old format
-        "raw" in (x.value as any)), // New raw format
+    x => x.type === "object" && "branding" in (x.value as any),
   );
 
   if (brandingReturnIndex === -1 || brandingReturnIndex === undefined) {
     return document;
   }
 
-  const value = document.actions!.javascriptReturns![brandingReturnIndex].value;
+  // cast as any since this is js return, we might need to validate this
+  const rawBranding = document.actions!.javascriptReturns![brandingReturnIndex]
+    .value as any;
 
-  // remove the branding return from the actions javascript returns
   document.actions!.javascriptReturns!.splice(brandingReturnIndex, 1);
 
-  let jsBranding: BrandingProfile | undefined;
-
-  if (typeof value === "string") {
-    try {
-      const parsed = JSON.parse(value);
-      // Check if it's raw format and process it
-      if (parsed.raw) {
-        jsBranding = processRawBranding(parsed.raw);
-      } else {
-        jsBranding = parsed as BrandingProfile;
-      }
-    } catch (error) {
-      meta.logger.warn("Failed to parse branding javascript return", {
-        error,
-      });
-    }
-  } else if (value && typeof value === "object") {
-    // Check if it's raw format and process it
-    if ((value as any).raw) {
-      jsBranding = processRawBranding((value as any).raw);
-    } else {
-      jsBranding = value as BrandingProfile;
-    }
-  }
-
-  if (!jsBranding) {
-    return document;
-  }
-
-  // Enhance with LLM
-  try {
-    meta.logger.info("Enhancing branding with LLM...");
-
-    // Extract button snapshots from JS analysis
-    const buttonSnapshots: ButtonSnapshot[] =
-      (jsBranding as any).__button_snapshots || [];
-
-    // Enrich with HTML if available
-    if (document.rawHtml && buttonSnapshots.length > 0) {
-      // Extract button HTML snippets
-      const buttonMatches =
-        document.rawHtml.match(/<button[^>]*>[\s\S]*?<\/button>/gi) || [];
-      const anchorMatches =
-        document.rawHtml.match(
-          /<a[^>]*class="[^"]*btn[^"]*"[^>]*>[\s\S]*?<\/a>/gi,
-        ) || [];
-      const allButtonHtml = [...buttonMatches, ...anchorMatches].slice(0, 20);
-
-      // Try to match HTML to snapshots by text content
-      buttonSnapshots.forEach((snap, idx) => {
-        if (idx < allButtonHtml.length) {
-          snap.html = allButtonHtml[idx].substring(0, 500); // Limit HTML length
-        }
-      });
-    }
-
-    meta.logger.info(
-      `Sending ${buttonSnapshots.length} buttons to LLM for classification`,
-    );
-
-    const llmEnhancement = await enhanceBrandingWithLLM({
-      jsAnalysis: jsBranding,
-      buttons: buttonSnapshots,
-      screenshot: document.screenshot, // Use screenshot if available
-      url: document.url || meta.url,
-    });
-
-    meta.logger.info("LLM enhancement complete", {
-      primary_btn_index: llmEnhancement.buttonClassification.primaryButtonIndex,
-      secondary_btn_index:
-        llmEnhancement.buttonClassification.secondaryButtonIndex,
-      button_confidence: llmEnhancement.buttonClassification.confidence,
-      color_confidence: llmEnhancement.colorRoles.confidence,
-    });
-
-    document.branding = mergeBrandingResults(
-      jsBranding,
-      llmEnhancement,
-      buttonSnapshots,
-    );
-
-    const DEBUG = process.env.DEBUG_BRANDING === "true";
-
-    if (DEBUG) {
-      (document.branding as any).__button_snapshots = buttonSnapshots;
-    }
-
-    delete (document.branding as any).__framework_hints;
-    delete (document.branding as any).confidence;
-
-    if (!DEBUG) {
-      delete (document.branding as any).__llm_button_reasoning;
-    }
-  } catch (error) {
-    meta.logger.error(
-      "LLM branding enhancement failed, using JS analysis only",
-      { error },
-    );
-    document.branding = jsBranding;
-    delete (document.branding as any).__framework_hints;
-  }
+  document.branding = await brandingTransformer(
+    meta,
+    document,
+    rawBranding?.value?.branding,
+  );
 
   return document;
 }
