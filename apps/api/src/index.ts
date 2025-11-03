@@ -35,7 +35,6 @@ import { nuqShutdown } from "./services/worker/nuq";
 import { getErrorContactMessage } from "./lib/deployment";
 import { initializeBlocklist } from "./scraper/WebScraper/utils/blocklist";
 import responseTime from "response-time";
-import path from "node:path";
 
 const { createBullBoard } = require("@bull-board/api");
 const { BullMQAdapter } = require("@bull-board/api/bullMQAdapter");
