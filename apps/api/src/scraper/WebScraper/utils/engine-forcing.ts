@@ -60,9 +60,7 @@ function domainMatchesPattern(domain: string, pattern: string): boolean {
  */
 export function getEngineForUrl(url: string): Engine | Engine[] | undefined {
   if (engineMappings === null) {
-    throw new Error(
-      "Engine forcing not initialized. Call initializeEngineForcing() first.",
-    );
+    return undefined;
   }
 
   if (Object.keys(engineMappings).length === 0) {
