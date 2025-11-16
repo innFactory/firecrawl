@@ -25,6 +25,13 @@ setInterval(() => {
 
   _logger.info("api health check monitor", {
     lag_ms: lagMs.toFixed(2),
+    lagMin: histogram.min / 1e6,
+    lagMax: histogram.max / 1e6,
+    lag_p50_ms: histogram.percentile(50) / 1e6,
+    lag_p90_ms: histogram.percentile(90) / 1e6,
+    lag_p95_ms: histogram.percentile(95) / 1e6,
+    lag_p99_ms: histogram.percentile(99) / 1e6,
+
     rss_mb: (m.rss / 1024 / 1024).toFixed(1),
     heap_used_mb: (m.heapUsed / 1024 / 1024).toFixed(1),
     external_mb: (m.external / 1024 / 1024).toFixed(1),
@@ -37,15 +44,16 @@ setInterval(() => {
     semaphore_aborts: stats.semaphore_aborts,
 
     acquire_hist: {
-      count: histogram.count,
-      min: histogram.min / 1e6,
-      max: histogram.max / 1e6,
-      mean: histogram.mean / 1e6,
-      stddev: histogram.stddev / 1e6,
-      p50_ms: histogram.percentile(50) / 1e6,
-      p90_ms: histogram.percentile(90) / 1e6,
-      p95_ms: histogram.percentile(95) / 1e6,
-      p99_ms: histogram.percentile(99) / 1e6,
+      count: semaphoreAcquireHistogram.count,
+      lastCount: lastHistCount,
+      min: semaphoreAcquireHistogram.min / 1e6,
+      max: semaphoreAcquireHistogram.max / 1e6,
+      mean: semaphoreAcquireHistogram.mean / 1e6,
+      stddev: semaphoreAcquireHistogram.stddev / 1e6,
+      p50_ms: semaphoreAcquireHistogram.percentile(50) / 1e6,
+      p90_ms: semaphoreAcquireHistogram.percentile(90) / 1e6,
+      p95_ms: semaphoreAcquireHistogram.percentile(95) / 1e6,
+      p99_ms: semaphoreAcquireHistogram.percentile(99) / 1e6,
     },
 
     process_hist: {
@@ -73,16 +81,16 @@ setInterval(() => {
     semaphore_aborts: stats.semaphore_aborts,
 
     acquire_hist: {
-      count: histogram.count,
+      count: semaphoreAcquireHistogram.count,
       lastCount: lastHistCount,
-      min: histogram.min / 1e6,
-      max: histogram.max / 1e6,
-      mean: histogram.mean / 1e6,
-      stddev: histogram.stddev / 1e6,
-      p50_ms: histogram.percentile(50) / 1e6,
-      p90_ms: histogram.percentile(90) / 1e6,
-      p95_ms: histogram.percentile(95) / 1e6,
-      p99_ms: histogram.percentile(99) / 1e6,
+      min: semaphoreAcquireHistogram.min / 1e6,
+      max: semaphoreAcquireHistogram.max / 1e6,
+      mean: semaphoreAcquireHistogram.mean / 1e6,
+      stddev: semaphoreAcquireHistogram.stddev / 1e6,
+      p50_ms: semaphoreAcquireHistogram.percentile(50) / 1e6,
+      p90_ms: semaphoreAcquireHistogram.percentile(90) / 1e6,
+      p95_ms: semaphoreAcquireHistogram.percentile(95) / 1e6,
+      p99_ms: semaphoreAcquireHistogram.percentile(99) / 1e6,
     },
 
     process_hist: {
@@ -98,7 +106,7 @@ setInterval(() => {
     },
   });
 
-  lastHistCount = histogram.count;
+  lastHistCount = semaphoreAcquireHistogram.count;
 
   stats.semaphore_grants = 0;
   stats.semaphore_retries = 0;
@@ -264,7 +272,8 @@ async function withSemaphore<T>(
       teamId,
       jobId: holderId,
     });
-    return await func(false);
+    // return await func(false);
+    limit = 2;
   }
 
   const { limited } = await acquireBlocking(teamId, holderId, limit, {
