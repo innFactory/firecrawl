@@ -1,7 +1,106 @@
 import { isSelfHosted } from "../../lib/deployment";
-import { TransportableError } from "../../lib/error";
+import { ScrapeJobTimeoutError, TransportableError } from "../../lib/error";
 import { logger as _logger } from "../../lib/logger";
 import { nuqRedis, semaphoreKeys } from "./redis";
+import { createHistogram, monitorEventLoopDelay } from "node:perf_hooks";
+
+const stats = {
+  active_semaphores: 0,
+  semaphore_retries: 0,
+  semaphore_failures: 0,
+  semaphore_timeouts: 0,
+  semaphore_aborts: 0,
+};
+
+const semaphoreAcquireHistogram = createHistogram();
+const semaphoreProcessHistogram = createHistogram();
+
+const histogram = monitorEventLoopDelay();
+histogram.enable();
+
+setInterval(() => {
+  const lagMs = histogram.mean / 1e6;
+  const m = process.memoryUsage();
+
+  _logger.info("api health check monitor", {
+    lag_ms: lagMs.toFixed(2),
+    rss_mb: (m.rss / 1024 / 1024).toFixed(1),
+    heap_used_mb: (m.heapUsed / 1024 / 1024).toFixed(1),
+    external_mb: (m.external / 1024 / 1024).toFixed(1),
+
+    active_semaphores: stats.active_semaphores,
+    semaphore_retries: stats.semaphore_retries,
+    semaphore_failures: stats.semaphore_failures,
+    semaphore_timeouts: stats.semaphore_timeouts,
+    semaphore_aborts: stats.semaphore_aborts,
+
+    acquire_hist: {
+      count: histogram.count,
+      min: histogram.min,
+      max: histogram.max,
+      mean: histogram.mean,
+      stddev: histogram.stddev,
+      p50_ms: histogram.percentile(50) / 1e6,
+      p90_ms: histogram.percentile(90) / 1e6,
+      p95_ms: histogram.percentile(95) / 1e6,
+      p99_ms: histogram.percentile(99) / 1e6,
+    },
+
+    process_hist: {
+      count: semaphoreProcessHistogram.count,
+      min: semaphoreProcessHistogram.min,
+      max: semaphoreProcessHistogram.max,
+      mean: semaphoreProcessHistogram.mean,
+      stddev: semaphoreProcessHistogram.stddev,
+      p50_ms: semaphoreProcessHistogram.percentile(50) / 1e6,
+      p90_ms: semaphoreProcessHistogram.percentile(90) / 1e6,
+      p95_ms: semaphoreProcessHistogram.percentile(95) / 1e6,
+      p99_ms: semaphoreProcessHistogram.percentile(99) / 1e6,
+    },
+  });
+}, 10_000);
+
+setInterval(() => {
+  _logger.info("api health check semaphore", {
+    active_semaphores: stats.active_semaphores,
+    semaphore_retries: stats.semaphore_retries,
+    semaphore_failures: stats.semaphore_failures,
+    semaphore_timeouts: stats.semaphore_timeouts,
+    semaphore_aborts: stats.semaphore_aborts,
+
+    acquire_hist: {
+      count: histogram.count,
+      min: histogram.min,
+      max: histogram.max,
+      mean: histogram.mean,
+      stddev: histogram.stddev,
+      p50_ms: histogram.percentile(50) / 1e6,
+      p90_ms: histogram.percentile(90) / 1e6,
+      p95_ms: histogram.percentile(95) / 1e6,
+      p99_ms: histogram.percentile(99) / 1e6,
+    },
+
+    process_hist: {
+      count: semaphoreProcessHistogram.count,
+      min: semaphoreProcessHistogram.min,
+      max: semaphoreProcessHistogram.max,
+      mean: semaphoreProcessHistogram.mean,
+      stddev: semaphoreProcessHistogram.stddev,
+      p50_ms: semaphoreProcessHistogram.percentile(50) / 1e6,
+      p90_ms: semaphoreProcessHistogram.percentile(90) / 1e6,
+      p95_ms: semaphoreProcessHistogram.percentile(95) / 1e6,
+      p99_ms: semaphoreProcessHistogram.percentile(99) / 1e6,
+    },
+  });
+
+  stats.semaphore_retries = 0;
+  stats.semaphore_failures = 0;
+  stats.semaphore_timeouts = 0;
+  stats.semaphore_aborts = 0;
+
+  semaphoreAcquireHistogram.reset();
+  semaphoreProcessHistogram.reset();
+}, 60_000);
 
 const { scripts, runScript, ensure } = nuqRedis;
 
@@ -47,13 +146,18 @@ async function acquireBlocking(
   let delay = options.base_delay_ms;
   let totalRemoved = 0;
   let failedOnce = false;
+
+  let start = process.hrtime.bigint();
+
   do {
     if (options.signal.aborted) {
-      throw new TransportableError("SCRAPE_TIMEOUT", "semaphore_aborted");
+      stats.semaphore_aborts++;
+      throw new ScrapeJobTimeoutError("Scrape timed out");
     }
 
     if (deadline < Date.now()) {
-      throw new TransportableError("SCRAPE_TIMEOUT", "semaphore_timeout");
+      stats.semaphore_timeouts++;
+      throw new ScrapeJobTimeoutError("Scrape timed out");
     }
 
     const [granted, _count, _removed] = await runScript<
@@ -67,8 +171,13 @@ async function acquireBlocking(
     totalRemoved++;
 
     if (granted === 1) {
+      const duration = process.hrtime.bigint() - start;
+      semaphoreAcquireHistogram.record(duration);
+
       return { limited: failedOnce, removed: totalRemoved };
     }
+
+    stats.semaphore_retries++;
 
     failedOnce = true;
 
@@ -77,7 +186,7 @@ async function acquireBlocking(
     );
     await new Promise(r => setTimeout(r, delay + jitter));
 
-    delay = Math.max(options.max_delay_ms, Math.floor(delay * 1.5));
+    delay = Math.min(options.max_delay_ms, Math.floor(delay * 1.5));
   } while (true);
 }
 
@@ -109,6 +218,30 @@ async function count(teamId: string): Promise<number> {
   return count;
 }
 
+function startHeartbeat(teamId: string, holderId: string, intervalMs: number) {
+  let stopped = false;
+
+  const promise = (async () => {
+    while (!stopped) {
+      const ok = await heartbeat(teamId, holderId);
+      if (!ok) {
+        throw new TransportableError("SCRAPE_TIMEOUT", "heartbeat_failed");
+      }
+      await new Promise(r => setTimeout(r, intervalMs));
+    }
+    return Promise.reject(
+      new Error("heartbeat loop stopped unexpectedly"),
+    ) as never;
+  })();
+
+  return {
+    promise,
+    stop() {
+      stopped = true;
+    },
+  };
+}
+
 async function withSemaphore<T>(
   teamId: string,
   holderId: string,
@@ -118,8 +251,11 @@ async function withSemaphore<T>(
   func: (limited: boolean) => Promise<T>,
 ): Promise<T> {
   if (isSelfHosted() && limit <= 1) {
-    limit = 1024; // TODO(delong3): change back to `return await func(false)`
-    // return await func(false);
+    _logger.debug(`Bypassing concurrency limit for ${teamId}`, {
+      teamId,
+      jobId: holderId,
+    });
+    return await func(false);
   }
 
   const { limited } = await acquireBlocking(teamId, holderId, limit, {
@@ -129,29 +265,25 @@ async function withSemaphore<T>(
     signal,
   });
 
-  let intervalHandle: NodeJS.Timeout | null = null;
-  try {
-    const heartbeatPromise = new Promise<never>((_, reject) => {
-      intervalHandle = setInterval(() => {
-        heartbeat(teamId, holderId).then(success => {
-          if (!success) {
-            if (intervalHandle) clearInterval(intervalHandle);
-            reject(
-              new TransportableError(
-                "SCRAPE_TIMEOUT",
-                "semaphore_heartbeat_failed",
-              ),
-            );
-          }
-        });
-      }, SEMAPHORE_TTL / 2);
-    });
+  if (limited) {
+    stats.semaphore_failures++;
+  }
 
-    const result = await Promise.race([func(limited), heartbeatPromise]);
+  const hb = startHeartbeat(teamId, holderId, SEMAPHORE_TTL / 2);
+  const start = process.hrtime.bigint();
+
+  stats.active_semaphores++;
+  try {
+    const result = await Promise.race([func(limited), hb.promise]);
     return result;
   } finally {
-    if (intervalHandle) clearInterval(intervalHandle);
+    stats.active_semaphores--;
+    hb.stop();
+
     await release(teamId, holderId).catch(() => {});
+
+    const duration = process.hrtime.bigint() - start;
+    semaphoreProcessHistogram.record(duration);
   }
 }
 
