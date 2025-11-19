@@ -18,7 +18,7 @@ const (
 	defaultShutdownTimeout = 30 * time.Second
 	defaultReadTimeout     = 30 * time.Second
 	defaultWriteTimeout    = 30 * time.Second
-	maxUploadSize          = 36 * 1024 * 1024
+	maxUploadSize          = 50 * 1024 * 1024
 )
 
 func main() {
