@@ -11,7 +11,7 @@ import {
 import { billTeam } from "../../services/billing/credit_billing";
 import { v7 as uuidv7 } from "uuid";
 import { addScrapeJob, waitForJob } from "../../services/queue-jobs";
-import { logSearch } from "../../services/logging/log_job";
+import { logSearch, logRequest } from "../../services/logging/log_job";
 import { search } from "../../search/v2";
 import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import * as Sentry from "@sentry/node";
@@ -52,6 +52,7 @@ async function startScrapeJob(
     bypassBilling?: boolean;
     apiKeyId: number | null;
     zeroDataRetention?: boolean;
+    requestId?: string;
   },
   logger: Logger,
   flags: TeamFlags,
@@ -97,6 +98,7 @@ async function startScrapeJob(
       startTime: Date.now(),
       zeroDataRetention,
       apiKeyId: options.apiKeyId,
+      requestId: options.requestId,
     },
     jobId,
     jobPriority,
@@ -117,6 +119,7 @@ async function scrapeSearchResult(
     bypassBilling?: boolean;
     apiKeyId: number | null;
     zeroDataRetention?: boolean;
+    requestId?: string;
   },
   logger: Logger,
   flags: TeamFlags,
@@ -242,6 +245,20 @@ export async function searchController(
       origin: req.body.origin,
     });
 
+    const isZDR = req.body.enterprise?.includes("zdr");
+    const isAnon = req.body.enterprise?.includes("anon");
+    const isZDROrAnon = isZDR || isAnon;
+
+    await logRequest({
+      id: jobId,
+      kind: "search",
+      api_version: "v2",
+      team_id: req.auth.team_id,
+      origin: req.body.origin ?? "api",
+      target_hint: req.body.query,
+      zeroDataRetention: isZDROrAnon ?? false, // not supported for search
+    });
+
     let limit = req.body.limit;
 
     // Buffer results by 50% to account for filtered URLs
@@ -252,10 +269,6 @@ export async function searchController(
     // Extract unique types from sources for the search function
     // After transformation, sources is always an array of objects
     const searchTypes = [...new Set(req.body.sources.map((s: any) => s.type))];
-
-    const isZDR = req.body.enterprise?.includes("zdr");
-    const isAnon = req.body.enterprise?.includes("anon");
-    const isZDROrAnon = isZDR || isAnon;
 
     // Build search query with category filters
     const { query: searchQuery, categoryMap } = buildSearchQuery(
@@ -346,6 +359,7 @@ export async function searchController(
         bypassBilling: !isAsyncScraping, // Async mode bills per job, sync mode bills manually
         apiKeyId: req.acuc?.api_key_id ?? null,
         zeroDataRetention: isZDROrAnon,
+        requestId: jobId,
       };
 
       const directToBullMQ = (req.acuc?.price_credits ?? 0) <= 3000;
