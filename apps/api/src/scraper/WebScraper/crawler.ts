@@ -17,6 +17,7 @@ import { ScrapeOptions } from "../../controllers/v2/types";
 import { filterLinks, filterUrl } from "@mendable/firecrawl-rs";
 
 export const SITEMAP_LIMIT = 100;
+const SITEMAP_MAX_AGE = 48 * 60 * 60 * 1000;
 
 interface FilterResult {
   allowed: boolean;
@@ -494,10 +495,6 @@ export class WebCrawler {
       );
     });
 
-    // Allow sitemaps to be cached for 48 hours if they are requested from /map
-    // - mogery
-    const maxAge = fromMap && !onlySitemap ? 48 * 60 * 60 * 1000 : 0;
-
     try {
       const robotsSitemaps = this.robots.getSitemaps();
       this.logger.debug("Attempting to fetch sitemap links", {
@@ -515,10 +512,16 @@ export class WebCrawler {
             _urlsHandler,
             abort,
             mock,
-            maxAge,
+            SITEMAP_MAX_AGE,
           ),
           ...robotsSitemaps.map(x =>
-            this.tryFetchSitemapLinks(x, _urlsHandler, abort, mock, maxAge),
+            this.tryFetchSitemapLinks(
+              x,
+              _urlsHandler,
+              abort,
+              mock,
+              SITEMAP_MAX_AGE,
+            ),
           ),
         ]).then(results => results.reduce((a, x) => a + x, 0)),
         timeoutPromise,
@@ -717,6 +720,7 @@ export class WebCrawler {
       method: "tryFetchSitemapLinks",
       originalUrl: url,
       sitemapUrl,
+      maxAge,
       isXmlUrl: url.endsWith(".xml"),
       isGzUrl: url.endsWith(".xml.gz"),
     });
@@ -756,49 +760,57 @@ export class WebCrawler {
     try {
       const urlObj = new URL(url);
       const hostname = urlObj.hostname;
-      const domainParts = hostname.split(".");
 
-      // Check if this is a subdomain (has more than 2 parts and not www)
-      if (domainParts.length > 2 && domainParts[0] !== "www") {
-        // Get the main domain by taking the last two parts
-        const mainDomain = domainParts.slice(-2).join(".");
-        const mainDomainUrl = `${urlObj.protocol}//${mainDomain}`;
-        const mainDomainSitemapUrl = `${mainDomainUrl}/sitemap.xml`;
+      // Skip subdomain logic for IP addresses (IPv4 or IPv6)
+      const isIPv4 = /^(\d{1,3}\.){3}\d{1,3}$/.test(hostname);
+      const isIPv6 = hostname.includes(":");
+      if (isIPv4 || isIPv6) {
+        // IP addresses don't have subdomains, skip this logic
+      } else {
+        const domainParts = hostname.split(".");
 
-        try {
-          // Get all links from the main domain's sitemap
-          sitemapCount += await getLinksFromSitemap(
-            {
-              sitemapUrl: mainDomainSitemapUrl,
-              urlsHandler(urls) {
-                return urlsHandler(
-                  urls.filter(link => {
-                    try {
-                      const linkUrl = new URL(link);
-                      return linkUrl.hostname.endsWith(hostname);
-                    } catch {}
-                  }),
-                );
+        // Check if this is a subdomain (has more than 2 parts and not www)
+        if (domainParts.length > 2 && domainParts[0] !== "www") {
+          // Get the main domain by taking the last two parts
+          const mainDomain = domainParts.slice(-2).join(".");
+          const mainDomainUrl = `${urlObj.protocol}//${mainDomain}`;
+          const mainDomainSitemapUrl = `${mainDomainUrl}/sitemap.xml`;
+
+          try {
+            // Get all links from the main domain's sitemap
+            sitemapCount += await getLinksFromSitemap(
+              {
+                sitemapUrl: mainDomainSitemapUrl,
+                urlsHandler(urls) {
+                  return urlsHandler(
+                    urls.filter(link => {
+                      try {
+                        const linkUrl = new URL(link);
+                        return linkUrl.hostname.endsWith(hostname);
+                      } catch {}
+                    }),
+                  );
+                },
+                mode: "fire-engine",
+                maxAge,
+                zeroDataRetention: this.zeroDataRetention,
+                location: this.location,
               },
-              mode: "fire-engine",
-              maxAge,
-              zeroDataRetention: this.zeroDataRetention,
-              location: this.location,
-            },
-            this.logger,
-            this.jobId,
-            this.sitemapsHit,
-            abort,
-            mock,
-          );
-        } catch (error) {
-          if (error instanceof ScrapeJobTimeoutError) {
-            throw error;
-          } else {
-            this.logger.debug(
-              `Failed to fetch main domain sitemap from ${mainDomainSitemapUrl}`,
-              { method: "tryFetchSitemapLinks", mainDomainSitemapUrl, error },
+              this.logger,
+              this.jobId,
+              this.sitemapsHit,
+              abort,
+              mock,
             );
+          } catch (error) {
+            if (error instanceof ScrapeJobTimeoutError) {
+              throw error;
+            } else {
+              this.logger.debug(
+                `Failed to fetch main domain sitemap from ${mainDomainSitemapUrl}`,
+                { method: "tryFetchSitemapLinks", mainDomainSitemapUrl, error },
+              );
+            }
           }
         }
       }

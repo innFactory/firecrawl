@@ -11,7 +11,7 @@ import {
 import { billTeam } from "../../services/billing/credit_billing";
 import { v7 as uuidv7 } from "uuid";
 import { addScrapeJob, waitForJob } from "../../services/queue-jobs";
-import { logJob } from "../../services/logging/log_job";
+import { logSearch, logRequest } from "../../services/logging/log_job";
 import { search } from "../../search/v2";
 import { isUrlBlocked } from "../../scraper/WebScraper/utils/blocklist";
 import * as Sentry from "@sentry/node";
@@ -51,6 +51,8 @@ async function startScrapeJob(
     scrapeOptions: ScrapeOptions;
     bypassBilling?: boolean;
     apiKeyId: number | null;
+    zeroDataRetention?: boolean;
+    requestId?: string;
   },
   logger: Logger,
   flags: TeamFlags,
@@ -59,7 +61,8 @@ async function startScrapeJob(
 ): Promise<string> {
   const jobId = uuidv7();
 
-  const zeroDataRetention = flags?.forceZDR ?? false;
+  const zeroDataRetention =
+    options.zeroDataRetention ?? flags?.forceZDR ?? false;
 
   logger.info("Adding scrape job", {
     scrapeId: jobId,
@@ -95,6 +98,7 @@ async function startScrapeJob(
       startTime: Date.now(),
       zeroDataRetention,
       apiKeyId: options.apiKeyId,
+      requestId: options.requestId,
     },
     jobId,
     jobPriority,
@@ -114,6 +118,8 @@ async function scrapeSearchResult(
     scrapeOptions: ScrapeOptions;
     bypassBilling?: boolean;
     apiKeyId: number | null;
+    zeroDataRetention?: boolean;
+    requestId?: string;
   },
   logger: Logger,
   flags: TeamFlags,
@@ -131,7 +137,12 @@ async function scrapeSearchResult(
       isSearchPreview,
     );
 
-    const doc: Document = await waitForJob(jobId, options.timeout, false);
+    const doc: Document = await waitForJob(
+      jobId,
+      options.timeout,
+      options.zeroDataRetention ?? false,
+      logger,
+    );
 
     logger.info("Scrape job completed", {
       scrapeId: jobId,
@@ -153,9 +164,9 @@ async function scrapeSearchResult(
     if (process.env.USE_DB_AUTHENTICATION === "true") {
       const { data: costTrackingResponse, error: costTrackingError } =
         await supabase_service
-          .from("firecrawl_jobs")
+          .from("scrapes")
           .select("cost_tracking")
-          .eq("job_id", jobId);
+          .eq("id", jobId);
 
       if (costTrackingError) {
         logger.error("Error getting cost tracking", {
@@ -239,6 +250,21 @@ export async function searchController(
       origin: req.body.origin,
     });
 
+    const isZDR = req.body.enterprise?.includes("zdr");
+    const isAnon = req.body.enterprise?.includes("anon");
+    const isZDROrAnon = isZDR || isAnon;
+
+    await logRequest({
+      id: jobId,
+      kind: "search",
+      api_version: "v2",
+      team_id: req.auth.team_id,
+      origin: req.body.origin ?? "api",
+      integration: req.body.integration,
+      target_hint: req.body.query,
+      zeroDataRetention: isZDROrAnon ?? false, // not supported for search
+    });
+
     let limit = req.body.limit;
 
     // Buffer results by 50% to account for filtered URLs
@@ -267,6 +293,7 @@ export async function searchController(
       country: req.body.country,
       location: req.body.location,
       type: searchTypes,
+      enterprise: req.body.enterprise,
     })) as SearchV2Response;
 
     // Add category labels to web results
@@ -321,8 +348,8 @@ export async function searchController(
     const isAsyncScraping = req.body.asyncScraping && shouldScrape;
 
     if (!shouldScrape) {
-      // No scraping - 2 credits per 10 search results
-      credits_billed = Math.ceil(totalResultsCount / 10) * 2;
+      const creditsPerTenResults = isZDR ? 10 : 2;
+      credits_billed = Math.ceil(totalResultsCount / 10) * creditsPerTenResults;
     } else {
       // Common setup for both async and sync scraping
       logger.info(
@@ -337,6 +364,8 @@ export async function searchController(
         scrapeOptions: req.body.scrapeOptions,
         bypassBilling: !isAsyncScraping, // Async mode bills per job, sync mode bills manually
         apiKeyId: req.acuc?.api_key_id ?? null,
+        zeroDataRetention: isZDROrAnon,
+        requestId: jobId,
       };
 
       const directToBullMQ = (req.acuc?.price_credits ?? 0) <= 3000;
@@ -472,8 +501,23 @@ export async function searchController(
           );
         }
 
-        // Don't bill here - let each job bill itself when it completes
-        credits_billed = allJobIds.length; // Just for reporting, not billing
+        const creditsPerTenResults = isZDR ? 10 : 2;
+        credits_billed =
+          Math.ceil(totalResultsCount / 10) * creditsPerTenResults;
+
+        // Bill for search results now (scrape jobs will bill themselves when they complete)
+        if (!isSearchPreview) {
+          billTeam(
+            req.auth.team_id,
+            req.acuc?.sub_id ?? undefined,
+            credits_billed,
+            req.acuc?.api_key_id ?? null,
+          ).catch(error => {
+            logger.error(
+              `Failed to bill team ${req.acuc?.sub_id} for ${credits_billed} credits: ${error}`,
+            );
+          });
+        }
 
         const endTime = new Date().getTime();
         const timeTakenInSeconds = (endTime - middlewareStartTime) / 1000;
@@ -484,32 +528,22 @@ export async function searchController(
           scrapeIds,
         });
 
-        logJob(
+        logSearch(
           {
-            job_id: jobId,
-            success: true,
-            num_docs:
-              (searchResponse.web?.length ?? 0) +
-              (searchResponse.images?.length ?? 0) +
-              (searchResponse.news?.length ?? 0),
-            docs: [searchResponse],
+            id: jobId,
+            request_id: jobId,
+            query: req.body.query,
+            is_successful: true,
+            error: undefined,
+            results: searchResponse as any,
+            num_results: totalResultsCount,
             time_taken: timeTakenInSeconds,
             team_id: req.auth.team_id,
-            mode: "search",
-            url: req.body.query,
-            scrapeOptions: req.body.scrapeOptions,
-            crawlerOptions: {
-              ...req.body,
-              query: undefined,
-              scrapeOptions: undefined,
-            },
-            origin: req.body.origin,
-            integration: req.body.integration,
-            credits_billed,
-            zeroDataRetention: false,
+            options: req.body,
+            credits_cost: credits_billed,
+            zeroDataRetention: isZDROrAnon ?? false,
           },
           false,
-          isSearchPreview,
         );
 
         // Log final timing information for async mode
@@ -588,7 +622,7 @@ export async function searchController(
               {
                 teamId: req.auth.team_id,
                 bypassBilling: true,
-                zeroDataRetention: false,
+                zeroDataRetention: isZDROrAnon,
               },
               docWithCost.document,
               docWithCost.costTracking,
@@ -599,10 +633,16 @@ export async function searchController(
 
         try {
           const individualCredits = await Promise.all(creditPromises);
-          credits_billed = individualCredits.reduce(
+          const scrapeCredits = individualCredits.reduce(
             (sum, credit) => sum + credit,
             0,
           );
+
+          const creditsPerTenResults = isZDR ? 10 : 2;
+          const searchCredits =
+            Math.ceil(totalResultsCount / 10) * creditsPerTenResults;
+
+          credits_billed = scrapeCredits + searchCredits;
         } catch (error) {
           logger.error("Error calculating credits for billing", { error });
           credits_billed = totalResultsCount;
@@ -641,33 +681,22 @@ export async function searchController(
       time_taken: timeTakenInSeconds,
     });
 
-    logJob(
+    logSearch(
       {
-        job_id: jobId,
-        success: true,
-        num_docs:
-          (searchResponse.web?.length ?? 0) +
-          (searchResponse.images?.length ?? 0) +
-          (searchResponse.news?.length ?? 0),
-        docs: [searchResponse],
+        id: jobId,
+        request_id: jobId,
+        query: req.body.query,
+        is_successful: true,
+        error: undefined,
+        results: searchResponse as any,
+        num_results: totalResultsCount,
         time_taken: timeTakenInSeconds,
         team_id: req.auth.team_id,
-        mode: "search",
-        url: req.body.query,
-        scrapeOptions: req.body.scrapeOptions,
-        crawlerOptions: {
-          ...req.body,
-          query: undefined,
-          scrapeOptions: undefined,
-          asyncScraping: isAsyncScraping,
-        },
-        origin: req.body.origin,
-        integration: req.body.integration,
-        credits_billed,
-        zeroDataRetention: false, // not supported
+        options: req.body,
+        credits_cost: credits_billed,
+        zeroDataRetention: isZDROrAnon ?? false, // not supported
       },
       false,
-      isSearchPreview,
     );
 
     // Log final timing information

@@ -96,15 +96,18 @@ BULL_AUTH_KEY=CHANGEME
 # REDIS_URL=redis://redis:6379
 # REDIS_RATE_LIMIT_URL=redis://redis:6379
 
+## === PostgreSQL Database Configuration ===
+# Configure PostgreSQL credentials. These should match the credentials used by the nuq-postgres container.
+# If you change these, ensure all three are set consistently.
+# POSTGRES_USER=postgres
+# POSTGRES_PASSWORD=postgres
+# POSTGRES_DB=postgres
+
 # Set if you have a llamaparse key you'd like to use to parse pdfs
 # LLAMAPARSE_API_KEY=
 
 # Set if you'd like to send server health status messages to Slack
 # SLACK_WEBHOOK_URL=
-
-# Set if you'd like to send posthog events like job logs
-# POSTHOG_API_KEY=
-# POSTHOG_HOST=
 
 ## === System Resource Configuration ===
 # Maximum CPU usage threshold (0.0-1.0). Worker will reject new jobs when CPU usage exceeds this value.

@@ -1,6 +1,6 @@
 import express from "express";
 import { redisHealthController } from "../controllers/v0/admin/redis-health";
-import { authMiddleware, blocklistMiddleware, wrap } from "./shared";
+import { wrap } from "./shared";
 import { acucCacheClearController } from "../controllers/v0/admin/acuc-cache-clear";
 import { checkFireEngine } from "../controllers/v0/admin/check-fire-engine";
 import { cclogController } from "../controllers/v0/admin/cclog";
@@ -11,9 +11,10 @@ import {
   metricsController,
   nuqMetricsController,
 } from "../controllers/v0/admin/metrics";
-import { crawlCheckController } from "../controllers/v0/admin/crawl-check";
 import { realtimeSearchController } from "../controllers/v2/f-search";
 import { concurrencyQueueBackfillController } from "../controllers/v0/admin/concurrency-queue-backfill";
+import { integCreateUserController } from "../controllers/v0/admin/create-user";
+import { integValidateApiKeyController } from "../controllers/v0/admin/validate-api-key";
 
 export const adminRouter = express.Router();
 
@@ -62,11 +63,6 @@ adminRouter.get(
   wrap(nuqMetricsController),
 );
 
-adminRouter.get(
-  `/admin/${process.env.BULL_AUTH_KEY}/crawl-check`,
-  wrap(crawlCheckController),
-);
-
 adminRouter.post(
   `/admin/${process.env.BULL_AUTH_KEY}/fsearch`,
   wrap(realtimeSearchController),
@@ -75,4 +71,14 @@ adminRouter.post(
 adminRouter.post(
   `/admin/${process.env.BULL_AUTH_KEY}/concurrency-queue-backfill`,
   wrap(concurrencyQueueBackfillController),
+);
+
+adminRouter.post(
+  `/admin/integration/create-user`,
+  wrap(integCreateUserController),
+);
+
+adminRouter.post(
+  `/admin/integration/validate-api-key`,
+  wrap(integValidateApiKeyController),
 );
