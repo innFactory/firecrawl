@@ -128,11 +128,7 @@ export async function extractStatusController(
     error: (() => {
       if (typeof extract?.error === "string") return extract.error;
       if (extract?.error && typeof extract.error === "object") {
-        return (
-          extract.error.message ||
-          extract.error.error ||
-          JSON.stringify(extract.error)
-        );
+        return extract.error.message || extract.error.error || JSON.stringify(extract.error);
       }
       return undefined;
     })(),
