@@ -21,7 +21,6 @@ import {
   scrapeURLWithEngine,
   shouldUseIndex,
 } from "./engines";
-import { parseMarkdown } from "../../lib/html-to-markdown";
 import { hasFormatOfType } from "../../lib/format-utils";
 import {
   ActionError,
@@ -72,9 +71,9 @@ import {
   AbortManagerThrownError,
 } from "./lib/abortManager";
 import { ScrapeJobTimeoutError, CrawlDenialError } from "../../lib/error";
-import { htmlTransform } from "./lib/removeUnwantedElements";
 import { postprocessors } from "./postprocessors";
 import { rewriteUrl } from "./lib/rewriteUrl";
+import { transformAndValidateContent } from "./lib/transformAndValidateContent";
 
 export type ScrapeUrlResponse =
   | {
@@ -354,28 +353,19 @@ async function scrapeURLLoopIter(
       meta.internalOptions.teamId === "sitemap" ||
       meta.internalOptions.teamId === "robots-txt"
     ) {
+      // For sitemap/robots-txt, we don't need to transform HTML or convert to markdown
       checkMarkdown = engineResult.html?.trim() ?? "";
     } else {
       // Transform HTML and convert to markdown for quality checking
       // This will be reused by transformers to avoid duplicate conversion
-      // Respect meta.options.onlyMainContent, but fallback to full content if empty
-      const useOnlyMainContent = meta.options.onlyMainContent ?? true;
-      transformedHtml = await htmlTransform(engineResult.html, meta.url, {
-        ...meta.options,
-        onlyMainContent: useOnlyMainContent,
-      });
-      checkMarkdown = await parseMarkdown(transformedHtml);
-      usedOnlyMainContent = useOnlyMainContent;
-
-      if (checkMarkdown.trim().length === 0 && useOnlyMainContent) {
-        // Fallback to full content if main content extraction resulted in empty markdown
-        transformedHtml = await htmlTransform(engineResult.html, meta.url, {
-          ...meta.options,
-          onlyMainContent: false,
-        });
-        checkMarkdown = await parseMarkdown(transformedHtml);
-        usedOnlyMainContent = false;
-      }
+      const result = await transformAndValidateContent(
+        engineResult.html,
+        meta.url,
+        meta.options,
+      );
+      transformedHtml = result.transformedHtml;
+      checkMarkdown = result.markdown;
+      usedOnlyMainContent = result.usedOnlyMainContent;
     }
 
     // Success factors

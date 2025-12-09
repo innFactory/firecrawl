@@ -87,7 +87,7 @@ async function deriveMarkdownFromHTML(
     return document;
   }
 
-  // JSON content type needs special formatting JSON properly takes precedence over reusing markdown
+  // JSON content type needs special formatting - takes precedence over reusing markdown
   // JSON content needs to be wrapped in ```json code blocks, not converted from HTML
   if (document.metadata.contentType?.includes("application/json")) {
     if (document.rawHtml === undefined) {
@@ -100,51 +100,15 @@ async function deriveMarkdownFromHTML(
     return document;
   }
 
-  // If markdown already exists (pre-computed from quality check), reuse it
-  // unless we need to retry with full content (onlyMainContent fallback)
-  if (
-    document.markdown !== undefined &&
-    !(
-      meta.options.onlyMainContent === true &&
-      document.markdown.trim().length === 0
-    )
-  ) {
-    return document;
-  }
-
-  // Ensure HTML exists before converting to markdown
-  if (document.html === undefined) {
+  // Markdown is always pre-computed in scrapeURLLoopIter (including onlyMainContent fallback),
+  // so we should always be able to reuse it here. If it's undefined, that's an error.
+  if (document.markdown === undefined) {
     throw new Error(
-      "html is undefined -- this transformer is being called out of order",
+      "markdown is undefined -- this should have been computed in scrapeURLLoopIter",
     );
   }
 
-  document.markdown = await parseMarkdown(document.html);
-
-  if (
-    meta.options.onlyMainContent === true &&
-    (!document.markdown || document.markdown.trim().length === 0)
-  ) {
-    meta.logger.info(
-      "Main content extraction resulted in empty markdown, falling back to full content extraction",
-    );
-
-    const fallbackMeta = {
-      ...meta,
-      options: {
-        ...meta.options,
-        onlyMainContent: false,
-      },
-    };
-
-    document = await deriveHTMLFromRawHTML(fallbackMeta, document);
-    document.markdown = await parseMarkdown(document.html);
-
-    meta.logger.info("Fallback to full content extraction completed", {
-      markdownLength: document.markdown?.length || 0,
-    });
-  }
-
+  // Markdown already exists and is ready to use (pre-computed from quality check)
   return document;
 }
 
