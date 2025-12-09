@@ -381,11 +381,27 @@ export async function extractData({
     // console.log("failed during extractSmartScrape.ts:generateCompletions", error);
   }
 
+  // Try to get extractedData from the SmartScrape wrapper
+  // If the LLM didn't follow the wrapper schema and returned data directly,
+  // fall back to using the entire extract object as the extracted data
   let extractedData = extract?.extractedData;
 
-  // console.log("shouldUseSmartscrape", extract?.shouldUseSmartscrape);
-  // console.log("smartscrape_reasoning", extract?.smartscrape_reasoning);
-  // console.log("smartscrape_prompt", extract?.smartscrape_prompt);
+  // Check if the LLM returned data without the SmartScrape wrapper
+  // This happens when the model ignores the wrapper schema and returns the user's schema directly
+  if (
+    extractedData === undefined &&
+    extract !== undefined &&
+    extract.shouldUseSmartscrape === undefined
+  ) {
+    logger.warn(
+      "LLM returned data without SmartScrape wrapper, using extract directly as extractedData",
+      {
+        extractKeys: Object.keys(extract),
+      },
+    );
+    extractedData = extract;
+  }
+
   try {
     logger.info("Smart schema resolved", {
       useAgent,
@@ -393,6 +409,7 @@ export async function extractData({
       url: urls,
       prompt: extract?.smartscrape_prompt,
       providedExtractId: extractId,
+      hasExtractedData: extractedData !== undefined,
     });
 
     if (useAgent && extract?.shouldUseSmartscrape) {

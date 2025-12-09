@@ -220,6 +220,29 @@ describeIf(ALLOW_TEST_SUITE_WEBSITE)("Scrape format variations", () => {
       scrapeTimeout,
     );
 
+    concurrentIf(TEST_PRODUCTION || HAS_AI)(
+      "handles json format with prompt only (no schema)",
+      async () => {
+        const response = await scrape(
+          {
+            url: base,
+            formats: [
+              {
+                type: "json",
+                prompt:
+                  "Extract the main heading and a brief description of the page",
+              },
+            ],
+          },
+          identity,
+        );
+
+        expect(response.json).toBeDefined();
+        expect(typeof response.json).toBe("object");
+      },
+      scrapeTimeout,
+    );
+
     concurrentIf(TEST_PRODUCTION)(
       "handles changeTracking format with options",
       async () => {
