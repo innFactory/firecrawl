@@ -109,6 +109,7 @@ export type EngineScrapeResult = {
 
   html: string;
   markdown?: string;
+  transformedHtml?: string;
   statusCode: number;
   error?: string;
 

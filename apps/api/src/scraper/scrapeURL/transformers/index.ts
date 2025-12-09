@@ -44,6 +44,12 @@ async function deriveHTMLFromRawHTML(
   meta: Meta,
   document: Document,
 ): Promise<Document> {
+  // If HTML already exists (pre-computed from quality check in scrapeURLLoopIter),
+  // reuse it to avoid duplicate htmlTransform call
+  if (document.html !== undefined) {
+    return document;
+  }
+
   if (document.rawHtml === undefined) {
     throw new Error(
       "rawHtml is undefined -- this transformer is being called out of order",
@@ -65,12 +71,6 @@ async function deriveMarkdownFromHTML(
   meta: Meta,
   document: Document,
 ): Promise<Document> {
-  if (document.html === undefined) {
-    throw new Error(
-      "html is undefined -- this transformer is being called out of order",
-    );
-  }
-
   // Only derive markdown if markdown format is requested or if formats that require markdown are requested:
   // - changeTracking requires markdown
   // - json format requires markdown (for LLM extraction)
@@ -87,6 +87,18 @@ async function deriveMarkdownFromHTML(
     return document;
   }
 
+  // If markdown already exists (pre-computed from quality check), reuse it
+  // unless we need to retry with full content (onlyMainContent fallback)
+  if (
+    document.markdown !== undefined &&
+    !(
+      meta.options.onlyMainContent === true &&
+      document.markdown.trim().length === 0
+    )
+  ) {
+    return document;
+  }
+
   if (document.metadata.contentType?.includes("application/json")) {
     if (document.rawHtml === undefined) {
       throw new Error(
@@ -96,6 +108,13 @@ async function deriveMarkdownFromHTML(
 
     document.markdown = "```json\n" + document.rawHtml + "\n```";
     return document;
+  }
+
+  // Ensure HTML exists before converting to markdown
+  if (document.html === undefined) {
+    throw new Error(
+      "html is undefined -- this transformer is being called out of order",
+    );
   }
 
   document.markdown = await parseMarkdown(document.html);

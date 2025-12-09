@@ -347,28 +347,34 @@ async function scrapeURLLoopIter(
     );
 
     let checkMarkdown: string;
+    let transformedHtml: string | undefined;
+    let usedOnlyMainContent: boolean | undefined;
+
     if (
       meta.internalOptions.teamId === "sitemap" ||
       meta.internalOptions.teamId === "robots-txt"
     ) {
       checkMarkdown = engineResult.html?.trim() ?? "";
     } else {
-      checkMarkdown = await parseMarkdown(
-        await htmlTransform(
-          engineResult.html,
-          meta.url,
-          scrapeOptions.parse({ onlyMainContent: true }),
-        ),
-      );
+      // Transform HTML and convert to markdown for quality checking
+      // This will be reused by transformers to avoid duplicate conversion
+      // Respect meta.options.onlyMainContent, but fallback to full content if empty
+      const useOnlyMainContent = meta.options.onlyMainContent ?? true;
+      transformedHtml = await htmlTransform(engineResult.html, meta.url, {
+        ...meta.options,
+        onlyMainContent: useOnlyMainContent,
+      });
+      checkMarkdown = await parseMarkdown(transformedHtml);
+      usedOnlyMainContent = useOnlyMainContent;
 
-      if (checkMarkdown.trim().length === 0) {
-        checkMarkdown = await parseMarkdown(
-          await htmlTransform(
-            engineResult.html,
-            meta.url,
-            scrapeOptions.parse({ onlyMainContent: false }),
-          ),
-        );
+      if (checkMarkdown.trim().length === 0 && useOnlyMainContent) {
+        // Fallback to full content if main content extraction resulted in empty markdown
+        transformedHtml = await htmlTransform(engineResult.html, meta.url, {
+          ...meta.options,
+          onlyMainContent: false,
+        });
+        checkMarkdown = await parseMarkdown(transformedHtml);
+        usedOnlyMainContent = false;
       }
     }
 
@@ -402,7 +408,13 @@ async function scrapeURLLoopIter(
       meta.logger.info("Scrape via " + engine + " deemed successful.", {
         factors: { isLongEnough, isGoodStatusCode, hasNoPageError },
       });
-      return engineResult;
+      // Store transformed HTML and markdown in engineResult for reuse by transformers
+      // This avoids duplicate conversion in transformers
+      return {
+        ...engineResult,
+        markdown: checkMarkdown,
+        transformedHtml: transformedHtml,
+      };
     } else {
       meta.logger.warn("Scrape via " + engine + " deemed unsuccessful.", {
         factors: { isLongEnough, isGoodStatusCode, hasNoPageError },
@@ -742,6 +754,8 @@ async function scrapeURLLoop(meta: Meta): Promise<ScrapeUrlResponse> {
 
     let document: Document = {
       markdown: engineResult.markdown,
+      // Pre-computed transformed HTML from quality check - reuse to avoid duplicate transformation
+      html: engineResult.transformedHtml,
       rawHtml: engineResult.html,
       screenshot: engineResult.screenshot,
       actions: engineResult.actions,
