@@ -38,9 +38,9 @@ WORKDIR /app
 COPY --from=builder /webhook-dispatcher /usr/local/bin/webhook-dispatcher
 
 # Run as non-root user
-RUN useradd -m -u 1000 webhooks && \
-    chown -R webhooks:webhooks /app
+RUN useradd -m -u 1000 appuser && \
+    chown -R appuser:appuser /app
 
-USER webhooks
+USER appuser
 
 CMD ["webhook-dispatcher"]
