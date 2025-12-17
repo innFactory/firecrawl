@@ -730,6 +730,7 @@ export const agentRequestSchema = z.strictObject({
     ),
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
+  overrideWhitelist: z.string().optional(),
 });
 
 export type AgentRequest = z.infer<typeof agentRequestSchema>;
@@ -740,6 +741,13 @@ const scrapeRequestSchemaBase = baseScrapeOptions.extend({
   origin: z.string().optional().prefault("api"),
   integration: integrationSchema.optional().transform(val => val || null),
   zeroDataRetention: z.boolean().optional(),
+  __agentInterop: z
+    .object({
+      auth: z.string(),
+      requestId: z.string(),
+      shouldBill: z.boolean(),
+    })
+    .optional(),
 });
 
 export const scrapeRequestSchema = strictWithMessage(scrapeRequestSchemaBase)
@@ -771,6 +779,13 @@ const batchScrapeRequestSchemaBase = baseScrapeOptions.extend({
   ignoreInvalidURLs: z.boolean().prefault(true),
   maxConcurrency: z.int().positive().optional(),
   zeroDataRetention: z.boolean().optional(),
+  __agentInterop: z
+    .object({
+      auth: z.string(),
+      requestId: z.string(),
+      shouldBill: z.boolean(),
+    })
+    .optional(),
 });
 
 export const batchScrapeRequestSchema = strictWithMessage(
@@ -788,6 +803,13 @@ const batchScrapeRequestSchemaNoURLValidationBase = baseScrapeOptions.extend({
   ignoreInvalidURLs: z.boolean().prefault(true),
   maxConcurrency: z.int().positive().optional(),
   zeroDataRetention: z.boolean().optional(),
+  __agentInterop: z
+    .object({
+      auth: z.string(),
+      requestId: z.string(),
+      shouldBill: z.boolean(),
+    })
+    .optional(),
 });
 
 export const batchScrapeRequestSchemaNoURLValidation = strictWithMessage(
@@ -1599,6 +1621,13 @@ export const searchRequestSchema = z
           .refine(x => {
             return x.filter(f => f.type === "screenshot").length <= 1;
           }, "You may only specify one screenshot format"),
+      })
+      .optional(),
+    __agentInterop: z
+      .object({
+        auth: z.string(),
+        requestId: z.string(),
+        shouldBill: z.boolean(),
       })
       .optional(),
   })

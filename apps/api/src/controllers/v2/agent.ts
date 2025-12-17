@@ -9,6 +9,7 @@ import {
 import { logger as _logger } from "../../lib/logger";
 import { logRequest } from "../../services/logging/log_job";
 import { config } from "../../config";
+import { supabase_service } from "../../services/supabase";
 
 export async function agentController(
   req: RequestWithAuth<{}, AgentResponse, AgentRequest>,
@@ -51,13 +52,31 @@ export async function agentController(
     });
   }
 
-  if (!req.acuc?.flags?.extractV3Beta && !req.acuc?.flags?.agentBeta) {
+  if (
+    !req.acuc?.flags?.extractV3Beta &&
+    !req.acuc?.flags?.agentBeta &&
+    !(
+      config.AGENT_INTEROP_SECRET &&
+      req.body.overrideWhitelist === config.AGENT_INTEROP_SECRET
+    )
+  ) {
     return res.status(400).json({
       success: false,
       error:
         "Agent beta is not enabled for your team. Please contact support@firecrawl.com to join the beta.",
     });
   }
+
+  const { data: freeRequest, error: freeRequestError } =
+    await supabase_service.rpc("agent_consume_free_request_if_left", {
+      i_team_id: req.auth.team_id,
+    });
+
+  if (freeRequestError) {
+    throw freeRequestError;
+  }
+
+  const isFreeRequest = !!freeRequest?.[0]?.consumed;
 
   await logRequest({
     id: agentId,
@@ -77,12 +96,17 @@ export async function agentController(
       method: "POST",
       headers: {
         "Content-Type": "application/json",
+        Authorization: `Bearer ${config.AGENT_INTEROP_SECRET}`,
       },
       body: JSON.stringify({
         id: agentId,
         urls: req.body.urls,
         schema: req.body.schema,
         prompt: req.body.prompt,
+        apiKey: req.acuc!.api_key,
+        apiKeyId: req.acuc!.api_key_id ?? undefined,
+        teamId: req.auth.team_id,
+        isFreeRequest,
       }),
     },
   );
