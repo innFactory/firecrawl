@@ -45,3 +45,7 @@ jobs:
               cache-to: type=registry,ref=ghcr.io/firecrawl/firecrawl:buildcache,mode=max
               build-args: |
                 COMMIT_SHA=${{ github.sha }}
+              secrets: |
+                SENTRY_AUTH_TOKEN=${{ secrets.SENTRY_AUTH_TOKEN }}
+                SENTRY_ORG=${{ secrets.SENTRY_ORG }}
+                SENTRY_PROJECT=${{ secrets.SENTRY_PROJECT }}
