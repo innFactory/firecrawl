@@ -667,13 +667,21 @@ export async function searchController(
           0,
         );
 
-        // Total credits = search credits + scrape credits
+        // Total credits for response = search credits + scrape credits
+        // Note: Only search credits are billed here; scrape jobs bill themselves
         credits_billed = searchCredits + scrapeCredits;
 
         // Update response with scraped data
         Object.assign(searchResponse, scrapedResponse);
       }
     }
+
+    // Determine how many credits to bill (search credits only when scraping,
+    // since scrape jobs handle their own billing)
+    const creditsPerTenResults = isZDR ? 10 : 2;
+    const creditsToBill = shouldScrape
+      ? Math.ceil(totalResultsCount / 10) * creditsPerTenResults // Only search credits
+      : credits_billed; // No scraping, so credits_billed is just search credits
 
     // Bill team for search credits only
     // - Scrape jobs always handle their own billing (both sync and async)
@@ -685,11 +693,11 @@ export async function searchController(
       billTeam(
         req.auth.team_id,
         req.acuc?.sub_id ?? undefined,
-        credits_billed,
+        creditsToBill,
         req.acuc?.api_key_id ?? null,
       ).catch(error => {
         logger.error(
-          `Failed to bill team ${req.acuc?.sub_id} for ${credits_billed} credits: ${error}`,
+          `Failed to bill team ${req.acuc?.sub_id} for ${creditsToBill} credits: ${error}`,
         );
       });
     }

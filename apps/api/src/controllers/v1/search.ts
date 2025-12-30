@@ -384,22 +384,33 @@ export async function searchController(
         0,
       );
 
-      // Total credits = search credits + scrape credits
+      // Total credits for response = search credits + scrape credits
+      // Note: Only search credits are billed here; scrape jobs bill themselves
       credits_billed = searchCredits + scrapeCredits;
 
       allDocsWithCostTracking = docsWithCostTracking;
     }
+
+    // Determine how many credits to bill (search credits only when scraping,
+    // since scrape jobs handle their own billing)
+    const scrapeful = !!(
+      req.body.scrapeOptions.formats &&
+      req.body.scrapeOptions.formats.length > 0
+    );
+    const creditsToBill = scrapeful
+      ? Math.ceil(responseData.data.length / 10) * 2 // Only search credits
+      : credits_billed; // No scraping, so credits_billed is just search credits
 
     // Bill team for search credits only - scrape jobs handle their own billing
     if (!isSearchPreview) {
       billTeam(
         req.auth.team_id,
         req.acuc?.sub_id ?? undefined,
-        credits_billed,
+        creditsToBill,
         req.acuc?.api_key_id ?? null,
       ).catch(error => {
         logger.error(
-          `Failed to bill team ${req.auth.team_id} for ${responseData.data.length} credits: ${error}`,
+          `Failed to bill team ${req.auth.team_id} for ${creditsToBill} credits: ${error}`,
         );
       });
     }
@@ -437,10 +448,6 @@ export async function searchController(
     // Log final timing information
     const totalRequestTime = new Date().getTime() - middlewareStartTime;
     const controllerTime = new Date().getTime() - controllerStartTime;
-    const scrapeful = !!(
-      req.body.scrapeOptions.formats &&
-      req.body.scrapeOptions.formats.length > 0
-    );
     logger.info("Request metrics", {
       version: "v1",
       mode: "search",
