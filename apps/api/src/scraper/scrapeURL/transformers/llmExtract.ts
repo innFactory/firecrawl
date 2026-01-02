@@ -80,6 +80,10 @@ export function unwrapCompletionCheckResult(result: any): {
   return { data: result, extractionComplete: true, totalItemsInContent: null };
 }
 
+// Anti-hallucination prompt used in both main and chunking paths
+const ANTI_HALLUCINATION_PROMPT =
+  "Extract ONLY data that is explicitly present in the content. Do not invent, guess, or hallucinate any values. If data is not present, leave fields null or empty.";
+
 // Smart model selection based on schema
 function detectRecursiveSchema(schema: any): boolean {
   if (!schema || typeof schema !== "object") return false;
@@ -680,11 +684,9 @@ export async function generateCompletions({
     const useCompletionCheck = wrappedSchema !== schema;
 
     // Anti-hallucination system prompt addition
-    const antiHallucinationPrompt =
-      "Extract ONLY data that is explicitly present in the content. Do not invent, guess, or hallucinate any values. If data is not present, leave fields null or empty.";
     const enhancedSystemPrompt = options.systemPrompt
-      ? `${options.systemPrompt}\n\n${antiHallucinationPrompt}`
-      : antiHallucinationPrompt;
+      ? `${options.systemPrompt}\n\n${ANTI_HALLUCINATION_PROMPT}`
+      : ANTI_HALLUCINATION_PROMPT;
 
     const repairConfig = {
       experimental_repairText: async ({ text, error }) => {
@@ -1273,6 +1275,11 @@ async function generateCompletionsWithChunking({
     originalTokens: countTokens(markdown, modelId),
   });
 
+  // Anti-hallucination system prompt (same as main path)
+  const enhancedSystemPrompt = options.systemPrompt
+    ? `${options.systemPrompt}\n\n${ANTI_HALLUCINATION_PROMPT}`
+    : ANTI_HALLUCINATION_PROMPT;
+
   // Process all chunks in parallel
   const chunkPromises = chunks.map(async chunk => {
     const chunkPrompt =
@@ -1288,7 +1295,7 @@ async function generateCompletionsWithChunking({
         const result = await generateObject({
           model: retries === 0 ? model : retryModel,
           prompt: chunkPrompt,
-          system: options.systemPrompt,
+          system: enhancedSystemPrompt,
           schema: schema instanceof z.ZodType ? schema : jsonSchema(schema),
           providerOptions: {
             ...(providerOptions || {}),
